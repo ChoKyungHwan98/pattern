@@ -1,98 +1,42 @@
-# vinext-starter
+# 전투 AI 제작소
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+게임 기획자가 행동 타임라인과 FSM을 직접 만들고 60Hz 전투 런타임에서 검증하는
+Tauri 2 + React 데스크톱 제작 도구다.
 
-## Prerequisites
+## 실행
 
-- Node.js `>=22.13.0`
+필요 환경:
 
-## Quick Start
+- Node.js 22 이상
+- Rust stable
+- Windows WebView2
 
-```bash
+```powershell
 npm install
-npm run dev
+npm run desktop:dev
+```
+
+브라우저 UI만 확인하려면 `npm run dev` 후 `http://127.0.0.1:5174`를 연다.
+
+## 검사
+
+```powershell
+npm run typecheck
+npm run lint
+npm run test:run
 npm run build
+cd src-tauri
+cargo check
 ```
 
-This starter does not use `wrangler.jsonc`.
+## 현재 범위
 
-## Included Shape
+- 프로젝트 열기·저장·자동 저장
+- Typed Command와 Ctrl+Z/Y
+- FSM 상태·전환·조건·우선순위·행동 참조 편집
+- 프레임 단위 다중 트랙 행동 편집 기반
+- GLB·GLTF·FBX 로컬 가져오기와 애니메이션 미리보기
+- 문서 구동 결정론적 60Hz FSM 실험과 판단 기록
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+전체 Gate와 미완료 조건은 [PRODUCT_DIRECTION.md](./PRODUCT_DIRECTION.md)와
+[STATUS.md](./STATUS.md)를 참고한다.
