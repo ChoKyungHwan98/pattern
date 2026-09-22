@@ -1,22 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "사용자가 선택한 전투 프로젝트와 로컬 리소스만 읽고 씁니다.",
+  "description": "Default desktop capability",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "dialog:allow-open",
-    "dialog:allow-save",
-    "fs:allow-read-text-file",
-    "fs:allow-write-text-file",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        { "path": "$DOCUMENT/**" },
-        { "path": "$DOWNLOAD/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$APPDATA/**" }
-      ]
-    }
-  ]
+  "permissions": ["core:default"]
 }
+

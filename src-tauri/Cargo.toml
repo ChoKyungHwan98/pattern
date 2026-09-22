@@ -1,12 +1,12 @@
 [package]
-name = "combat-ai-workbench"
-version = "0.2.0"
-description = "전투 AI 제작소"
+name = "combat-pattern-editor"
+version = "0.1.0"
+description = "Local combat behavior authoring editor"
 authors = ["local"]
 edition = "2021"
 
 [lib]
-name = "combat_ai_workbench_lib"
+name = "combat_pattern_editor_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -15,6 +15,5 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
+tauri = { version = "2", features = [] }
+

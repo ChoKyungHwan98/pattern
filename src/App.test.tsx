@@ -1,0 +1,102 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+import { App } from "./App";
+
+describe("pattern library and editor", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("패턴 세트 안에 같은 종류의 그래프를 여러 개 만든다", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: /새 패턴 세트/ })[0]);
+    fireEvent.change(screen.getByPlaceholderText("예: 보스 1페이즈 전투 AI"), { target: { value: "보스 전투" } });
+    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
+
+    expect(screen.getAllByText("보스 전투").length).toBeGreaterThan(0);
+    createGraphThroughDialog("Animator FSM");
+    createGraphThroughDialog("몬스터 AI FSM");
+
+    expect(screen.getAllByText("Animator FSM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("몬스터 AI FSM").length).toBeGreaterThan(0);
+  });
+
+  it("한 세트에서 평면·계층 상태 머신과 행동 트리를 함께 관리한다", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Cinder Knight 예제 불러오기" }));
+
+    expect(screen.getAllByRole("button", { name: /Cinder Knight FSM/ })[0]).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /Cinder Knight Combat HFSM/ })[0]).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: /Cinder Knight Behavior Tree/ })[0]);
+    expect(screen.getAllByText("행동 트리").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Combat Root").length).toBeGreaterThan(0);
+  });
+
+  it("패턴 세트를 저장하고 다시 열 수 있다", () => {
+    const view = render(<App />);
+    fireEvent.click(screen.getAllByRole("button", { name: /새 패턴 세트/ })[0]);
+    fireEvent.change(screen.getByPlaceholderText("예: 보스 1페이즈 전투 AI"), { target: { value: "플레이어 로코모션" } });
+    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: /세트 목록/ }));
+    expect(screen.getByRole("button", { name: /플레이어 로코모션/ })).toBeVisible();
+
+    view.unmount();
+    render(<App />);
+    expect(screen.getByRole("button", { name: /플레이어 로코모션/ })).toBeVisible();
+  });
+
+  it("Unity 방식 단축키로 노드를 복제·삭제·복구한다", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Cinder Knight 예제 불러오기" }));
+
+    fireEvent.keyDown(window, { key: "d", ctrlKey: true });
+    expect(screen.getAllByText("Idle 복사본").length).toBeGreaterThan(0);
+
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(screen.queryByText("Idle 복사본")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(screen.getAllByText("Idle 복사본").length).toBeGreaterThan(0);
+  });
+
+  it("편집기 안에서 단축키 목록을 확인할 수 있다", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Cinder Knight 예제 불러오기" }));
+    fireEvent.click(screen.getByRole("button", { name: "단축키" }));
+
+    expect(screen.getByRole("dialog", { name: "편집기 단축키" })).toBeVisible();
+    expect(screen.getByText("선택한 노드 또는 전환 삭제")).toBeVisible();
+  });
+
+  it("전환 선택 상태에서 Delete로 지우고 Undo로 복구한다", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Cinder Knight 예제 불러오기" }));
+    fireEvent.click(screen.getByRole("button", { name: /나감.*Chase.*TargetVisible/ }));
+    expect(screen.getByText("전환 속성")).toBeVisible();
+
+    fireEvent.keyDown(window, { key: "Delete" });
+    expect(screen.queryByText("전환 속성")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(screen.getByText("전환 속성")).toBeVisible();
+  });
+
+  it("입력 중 Delete는 노드를 지우지 않고 Ctrl+S는 앱 저장으로 처리한다", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Cinder Knight 예제 불러오기" }));
+    const nameInput = screen.getByDisplayValue("Idle");
+    nameInput.focus();
+
+    fireEvent.keyDown(nameInput, { key: "Delete" });
+    expect(screen.getAllByText("Idle").length).toBeGreaterThan(0);
+
+    const notCancelled = fireEvent.keyDown(nameInput, { key: "s", ctrlKey: true });
+    expect(notCancelled).toBe(false);
+    expect(screen.getByRole("status")).toHaveTextContent("현재 작업을 저장했습니다.");
+  });
+});
+
+function createGraphThroughDialog(name: string) {
+  fireEvent.click(screen.getAllByRole("button", { name: /새 그래프/ })[0]);
+  fireEvent.change(screen.getByPlaceholderText("새 상태 머신"), { target: { value: name } });
+  fireEvent.click(screen.getByRole("button", { name: "그래프 만들기" }));
+}

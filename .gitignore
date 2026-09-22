@@ -1,50 +1,12 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/.vinext/
-/out/
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
-next-env.d.ts
-/dist/
-/src-tauri/target/
-/src-tauri/gen/
-/src-tauri/icons/source.png
-/local-assets/
-/asset-cache/
-/.wrangler/
-/outputs/
-/work/
-dev.out.log
-dev.err.log
+node_modules/
+dist/
+coverage/
+.vite/
 *.log
+src-tauri/target/
+src-tauri/gen/
+.DS_Store
+Thumbs.db
+
+# Licensed Unity Asset Store content. Keep source assets local-only.
+public/local-assets/

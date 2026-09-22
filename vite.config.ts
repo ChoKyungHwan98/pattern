@@ -1,24 +1,28 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const host = process.env.TAURI_DEV_HOST;
-
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  publicDir: mode === "studio" ? false : "public",
   clearScreen: false,
   server: {
-    port: 5174,
     strictPort: true,
-    host: host || "127.0.0.1",
-    hmr: host ? { protocol: "ws", host, port: 5175 } : undefined,
-    watch: {
-      ignored: ["**/src-tauri/**"],
-    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {
-    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
-    minify: process.env.TAURI_DEBUG ? false : "esbuild",
-    sourcemap: Boolean(process.env.TAURI_DEBUG),
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "es2022",
+    minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",
+    sourcemap: Boolean(process.env.TAURI_ENV_DEBUG),
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/jszip")) return "engine-export";
+          if (id.includes("node_modules/@xyflow") || id.includes("node_modules/@dagrejs")) return "graph-editor";
+          if (id.includes("node_modules/xstate") || id.includes("node_modules/mistreevous")) return "simulation";
+          if (id.includes("node_modules/react") || id.includes("node_modules/scheduler")) return "react";
+          return undefined;
+        },
+      },
+    },
   },
-});
+}));
