@@ -348,7 +348,7 @@ function toFlowEdges(graph: GraphDefinition, scopeId: string | undefined, select
       selected,
       markerEnd: { type: MarkerType.ArrowClosed, color: selected ? "#4cc2ff" : stroke },
       style: { stroke: selected ? "#4cc2ff" : stroke, strokeWidth: selected ? 2.2 : 1.4 },
-      labelStyle: { fill: selected ? "#dff5ff" : "#aeb5ba", fontSize: 9 },
+      labelStyle: { fill: selected ? "#dff5ff" : "#aeb5ba", fontSize: 12 },
       labelBgStyle: { fill: selected ? "#12384a" : "#1b1e22", fillOpacity: 0.96 },
       labelBgPadding: [6, 3],
       labelBgBorderRadius: 2,
