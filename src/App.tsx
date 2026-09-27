@@ -30,11 +30,13 @@ import type { EngineExportTarget } from "./adapters/engineManifest";
 import { createChildMachine, getRootScope, scopePath } from "./editor/stateMachine";
 import { createDiagnosticsReport } from "./editor/diagnostics";
 import { publishPatternArtifacts } from "./editor/studioArtifact";
+import { useScreenHistory } from "./editor/screenHistory";
 
 export function App() {
   const [library, setLibrary] = useState<PatternLibrary>(() => loadPatternLibrary(getWorkspaceId()));
   const [activeSetId, setActiveSetId] = useState<string>();
   const activeSet = library.sets.find((set) => set.id === activeSetId);
+  useScreenHistory(activeSetId, setActiveSetId);
 
   useEffect(() => {
     savePatternLibrary(library);
