@@ -24,12 +24,12 @@ export function summarizeTransition(edge: GraphEdge): string {
   const type = getTransitionTriggerType(edge);
   if (type === "condition") {
     if (!edge.conditions?.length) return edge.guard?.trim() || "조건을 추가하세요";
-    const separator = edge.conditionMode === "any" ? " OR " : " AND ";
+    const separator = edge.conditionMode === "any" ? " 또는 " : " 그리고 ";
     return edge.conditions.map(summarizeCondition).join(separator);
   }
   if (type === "event") return edge.eventName?.trim() || edge.trigger?.trim() || edge.label?.trim() || "이벤트를 지정하세요";
-  if (type === "completed") return "상태 완료 시";
-  if (type === "timeout") return `${Math.max(0, edge.timeoutMs ?? 0)}ms 경과`;
+  if (type === "completed") return "행동 완료 시";
+  if (type === "timeout") return `${Math.max(0, edge.timeoutMs ?? 0)}ms 후`;
   return "항상";
 }
 
@@ -57,8 +57,26 @@ export function isTransitionEligible(
   return edge.conditionMode === "any" ? results.some(Boolean) : results.every(Boolean);
 }
 
+const OPERATOR_LABELS: Record<ConditionOperator, string> = {
+  "==": "같음",
+  "!=": "다름",
+  ">": "큼",
+  ">=": "크거나 같음",
+  "<": "작음",
+  "<=": "작거나 같음",
+  contains: "포함",
+};
+
+export function operatorLabel(operator: ConditionOperator): string {
+  return OPERATOR_LABELS[operator] ?? operator;
+}
+
+/** Readable Korean sentence for canvas / inspector — not raw expression. */
 export function summarizeCondition(condition: TransitionCondition): string {
-  return `${condition.key || "변수"} ${condition.operator} ${condition.value || "값"}`;
+  const variable = condition.key?.trim() || "변수";
+  const op = operatorLabel(condition.operator);
+  const value = condition.value?.trim() || "값";
+  return `${variable} ${op} ${value}`;
 }
 
 function evaluateCondition(condition: TransitionCondition, entry?: BlackboardEntry): boolean {

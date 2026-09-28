@@ -1,5 +1,18 @@
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, PanelRightOpen, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createDomainGraphNode, type DomainEntityKind } from "./editor/domain";
+import {
+  createConditionGraphNode,
+  firstSelectableNodeId,
+  findScopeSystemNode,
+  type BehaviorPaletteId,
+} from "./editor/behaviorUi";
+import {
+  ANYWHERE_INTERRUPT_LABEL,
+  FLOW_CONDITION_PROMPT,
+  classifyAuthoringLink,
+  createContextVariableEntry,
+} from "./editor/authoringFlow";
 import type { ReactNode } from "react";
 import { BottomPanel } from "./components/BottomPanel";
 import { CreateGraphDialog } from "./components/CreateGraphDialog";
@@ -27,10 +40,10 @@ import {
 import { createPatternRuntime } from "./runtime/createPatternRuntime";
 import type { PatternRuntime, PatternRuntimeSnapshot } from "./runtime/types";
 import type { EngineExportTarget } from "./adapters/engineManifest";
-import { createChildMachine, getRootScope, scopePath } from "./editor/stateMachine";
+import { createChildMachine, getRootScope, isSystemNode, scopePath } from "./editor/stateMachine";
 import { createDiagnosticsReport } from "./editor/diagnostics";
 import { publishPatternArtifacts } from "./editor/studioArtifact";
-import { useScreenHistory } from "./editor/screenHistory";
+import { isStudioHosted, useScreenHistory } from "./editor/screenHistory";
 
 export function App() {
   const [library, setLibrary] = useState<PatternLibrary>(() => loadPatternLibrary(getWorkspaceId()));
@@ -73,52 +86,87 @@ export function App() {
 function PatternSetEditor({ set, onChange, onBack }: { set: PatternSet; onChange: (set: PatternSet) => void; onBack: () => void }) {
   const [selectedGraphId, setSelectedGraphId] = useState<string | undefined>(set.graphs[0]?.id);
   const [createOpen, setCreateOpen] = useState(false);
+  const setRef = useRef(set);
+  useEffect(() => { setRef.current = set; }, [set]);
+  const commitSet = (next: PatternSet) => {
+    setRef.current = next;
+    onChange(next);
+  };
   const graph = set.graphs.find((item) => item.id === selectedGraphId) ?? set.graphs[0];
 
-  const addGraph = (mode: GraphMode, name: string) => {
-    const newGraph = createGraph(mode, name);
-    onChange(touchSet({ ...set, graphs: [...set.graphs, newGraph] }));
+  const addGraph = (mode: GraphMode, name: string, description?: string) => {
+    const current = setRef.current;
+    const newGraph = createGraph(mode, name, description);
+    commitSet(touchSet({ ...current, graphs: [...current.graphs, newGraph] }));
     setSelectedGraphId(newGraph.id);
     setCreateOpen(false);
   };
 
   const updateGraph = (nextGraph: GraphDefinition) => {
+    const current = setRef.current;
     const now = new Date().toISOString();
-    onChange(touchSet({
-      ...set,
-      graphs: set.graphs.map((item) => item.id === nextGraph.id ? { ...nextGraph, updatedAt: now } : item),
+    commitSet(touchSet({
+      ...current,
+      graphs: current.graphs.map((item) => item.id === nextGraph.id ? { ...nextGraph, updatedAt: now } : item),
     }));
   };
   const renameGraph = (graphId: string, name: string) => {
-    onChange(touchSet({ ...set, graphs: set.graphs.map((item) => item.id === graphId ? { ...item, name, updatedAt: new Date().toISOString() } : item) }));
+    const current = setRef.current;
+    commitSet(touchSet({ ...current, graphs: current.graphs.map((item) => item.id === graphId ? { ...item, name, updatedAt: new Date().toISOString() } : item) }));
   };
   const duplicateGraph = (graphId: string) => {
-    const source = set.graphs.find((item) => item.id === graphId);
+    const current = setRef.current;
+    const source = current.graphs.find((item) => item.id === graphId);
     if (!source) return;
     const copy = duplicateGraphDefinition(source);
-    onChange(touchSet({ ...set, graphs: [...set.graphs, copy] }));
+    commitSet(touchSet({ ...current, graphs: [...current.graphs, copy] }));
     setSelectedGraphId(copy.id);
   };
   const deleteGraph = (graphId: string) => {
-    const remaining = set.graphs.filter((item) => item.id !== graphId);
-    onChange(touchSet({ ...set, graphs: remaining }));
+    const current = setRef.current;
+    const remaining = current.graphs.filter((item) => item.id !== graphId);
+    commitSet(touchSet({ ...current, graphs: remaining }));
     if (selectedGraphId === graphId) setSelectedGraphId(remaining[0]?.id);
+  };
+  const mergeSetUpdate = (next: PatternSet) => {
+    // GraphWorkbench may send blackboard/catalog patches with a slightly stale
+    // graphs snapshot; keep whichever graph revision is newer per id.
+    const current = setRef.current;
+    const byId = new Map(current.graphs.map((item) => [item.id, item]));
+    next.graphs.forEach((graphItem) => {
+      const prior = byId.get(graphItem.id);
+      if (!prior) {
+        byId.set(graphItem.id, graphItem);
+        return;
+      }
+      const nextUpdated = Date.parse(graphItem.updatedAt ?? "") || 0;
+      const priorUpdated = Date.parse(prior.updatedAt ?? "") || 0;
+      byId.set(graphItem.id, nextUpdated >= priorUpdated ? graphItem : prior);
+    });
+    commitSet(touchSet({
+      ...current,
+      ...next,
+      graphs: [...byId.values()],
+      blackboard: next.blackboard,
+    }));
   };
 
   if (!graph) {
     return (
       <div className="editor-app editor-empty-app">
         <header className="workbench-header empty-editor-header">
-          <button className="back-to-library" onClick={onBack}><ArrowLeft size={16} /><span>세트 목록</span></button>
+          {!isStudioHosted() && (
+            <button className="back-to-library" onClick={onBack}><ArrowLeft size={16} /><span>세트 목록</span></button>
+          )}
           <div className="header-document"><strong>{set.name}</strong><span>그래프 문서 0개</span></div>
         </header>
         <main className="workbench-shell sidebar-open inspector-closed">
           <HierarchyPanel setName={set.name} graphs={set.graphs} selectedGraphId={selectedGraphId} onGraphChange={setSelectedGraphId} onGraphCreate={() => setCreateOpen(true)} onNodeSelect={() => undefined} />
           <section className="empty-editor-canvas">
             <span><Plus size={23} /></span>
-            <strong>첫 그래프를 만드세요.</strong>
-            <p>이 세트에는 계층 상태 머신과 행동 트리를 필요한 만큼 추가할 수 있습니다.</p>
-            <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={15} /> 새 그래프</button>
+            <strong>첫 행동 패턴을 만드세요.</strong>
+            <p>상황·행동·판단으로 캐릭터 행동 흐름을 설계할 수 있습니다.</p>
+            <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={15} /> 새 행동 패턴</button>
           </section>
         </main>
         {createOpen && <CreateGraphDialog onClose={() => setCreateOpen(false)} onCreate={addGraph} />}
@@ -137,7 +185,7 @@ function PatternSetEditor({ set, onChange, onBack }: { set: PatternSet; onChange
       onGraphDuplicate={duplicateGraph}
       onGraphDelete={deleteGraph}
       onGraphUpdate={updateGraph}
-      onSetUpdate={onChange}
+      onSetUpdate={mergeSetUpdate}
       onBack={onBack}
       createDialog={createOpen ? <CreateGraphDialog onClose={() => setCreateOpen(false)} onCreate={addGraph} /> : null}
     />
@@ -158,7 +206,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
   onBack: () => void;
   createDialog: ReactNode;
 }) {
-  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(graph.initialNodeId ?? graph.rootNodeId ?? graph.nodes[0]?.id);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(firstSelectableNodeId(graph));
   const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [activeScopeId, setActiveScopeId] = useState<string | undefined>(graph.rootScopeId);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>("stopped");
@@ -170,6 +218,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
   const [commandNotice, setCommandNotice] = useState<string>();
   const runtimeRef = useRef<PatternRuntime | undefined>(undefined);
   const graphRef = useRef(graph);
+  const setRef = useRef(set);
   const blackboardRef = useRef(set.blackboard);
   const undoStackRef = useRef<GraphHistoryEntry[]>([]);
   const redoStackRef = useRef<GraphHistoryEntry[]>([]);
@@ -181,7 +230,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
   const activeNodeId = runtimeState === "stopped" ? undefined : runtimeSnapshot.activeNodeId;
 
   useEffect(() => { graphRef.current = graph; }, [graph]);
-  useEffect(() => { blackboardRef.current = set.blackboard; }, [set.blackboard]);
+  useEffect(() => { setRef.current = set; blackboardRef.current = set.blackboard; }, [set]);
 
   useEffect(() => {
     undoStackRef.current = [];
@@ -196,6 +245,14 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
 
   useEffect(() => {
     runtimeRef.current?.dispose();
+    runtimeRef.current = undefined;
+    if (!graphHasRunnableSituations(graph)) {
+      const resetHandle = window.setTimeout(() => {
+        setRuntimeSnapshot(emptyRuntimeSnapshot(graph));
+        setRuntimeState("stopped");
+      }, 0);
+      return () => { window.clearTimeout(resetHandle); };
+    }
     const runtime = createPatternRuntime(graph, blackboardRef.current);
     runtimeRef.current = runtime;
     const resetHandle = window.setTimeout(() => {
@@ -223,7 +280,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
   const selectGraph = (graphId: string) => {
     const nextGraph = set.graphs.find((item) => item.id === graphId);
     onGraphChange(graphId);
-    setSelectedNodeId(nextGraph?.initialNodeId ?? nextGraph?.rootNodeId ?? nextGraph?.nodes[0]?.id);
+    setSelectedNodeId(nextGraph ? firstSelectableNodeId(nextGraph) : undefined);
     setSelectedEdgeId(undefined);
     setActiveScopeId(nextGraph?.rootScopeId);
     setDrawerTab(undefined);
@@ -244,7 +301,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
     if (!snapshot) return;
     setRuntimeState("paused");
     setRuntimeSnapshot({ ...snapshot, state: "paused" });
-    setDrawerTab((current) => current ?? "trace");
+    setDrawerTab((current) => current ?? "simulation");
   };
 
   const seekRuntime = (tick: number) => {
@@ -259,7 +316,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
     if (!snapshot) return;
     setRuntimeState("paused");
     setRuntimeSnapshot({ ...snapshot, state: "paused" });
-    setDrawerTab("trace");
+    setDrawerTab("simulation");
   };
 
   const announce = (message: string) => setCommandNotice(message);
@@ -271,32 +328,123 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
     if (undoStackRef.current.length > 100) undoStackRef.current.shift();
     redoStackRef.current = [];
     graphRef.current = next;
+    setRef.current = {
+      ...setRef.current,
+      graphs: setRef.current.graphs.map((item) => item.id === next.id ? next : item),
+      updatedAt: new Date().toISOString(),
+    };
     onGraphUpdate(next);
     return true;
   };
   const moveNode = (nodeId: string, position: Point) => update((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nodeId ? { ...node, position } : node) }));
   const layoutNodes = (positions: Record<string, Point>) => update((current) => ({ ...current, nodes: current.nodes.map((node) => ({ ...node, position: positions[node.id] ?? node.position })) }));
-  const addNode = (position?: Point) => {
+  const addDomainNode = (entityKind: DomainEntityKind, position?: Point) => {
     const index = graph.nodes.length + 1;
-    const nodeId = `${graph.mode}-node-${crypto.randomUUID()}`;
     const scopeId = graph.mode === "bt" ? undefined : activeScopeId ?? graph.rootScopeId;
+    const wasEmpty = !graph.nodes.some((node) => !isSystemNode(node) && (graph.mode === "bt" || node.scopeId === scopeId));
+    const node = createDomainGraphNode({
+      mode: graph.mode,
+      entityKind,
+      index,
+      scopeId,
+      position: position ?? { x: 180 + index * 22, y: 160 + index * 18 },
+    });
+    // First situation gets a planner-friendly default name.
+    if (wasEmpty && entityKind === "state") {
+      node.name = "대기";
+    }
     update((current) => ({
       ...current,
-      nodes: [...current.nodes, { id: nodeId, name: graph.mode === "bt" ? `새 행동 ${index}` : `새 상태 ${index}`, kind: graph.mode === "bt" ? "task" : "state", scopeId, position: position ?? { x: 180 + index * 22, y: 160 + index * 18 }, subtitle: graph.mode === "bt" ? "행동" : "상태" }],
-      scopes: current.scopes.map((scope) => scope.id === scopeId && !scope.initialNodeId ? { ...scope, initialNodeId: nodeId } : scope),
-      initialNodeId: current.rootScopeId === scopeId && !current.initialNodeId ? nodeId : current.initialNodeId,
+      nodes: [...current.nodes, node],
+      scopes: current.scopes.map((scope) => scope.id === scopeId && !scope.initialNodeId ? { ...scope, initialNodeId: node.id } : scope),
+      initialNodeId: current.rootScopeId === scopeId && !current.initialNodeId ? node.id : current.initialNodeId,
     }));
-    setSelectedNodeId(nodeId);
+    setSelectedNodeId(node.id);
+    setSelectedEdgeId(undefined);
+    if (wasEmpty && entityKind === "state") {
+      announce("첫 상황을 만들었습니다. 이름을 바꾸고 다음 상황·흐름을 이으세요.");
+    }
+  };
+  const addNode = (position?: Point) => {
+    addDomainNode(graph.mode === "bt" ? "action" : "state", position);
+  };
+  const addConditionNode = (position?: Point) => {
+    const index = graph.nodes.length + 1;
+    const scopeId = graph.mode === "bt" ? undefined : activeScopeId ?? graph.rootScopeId;
+    const node = createConditionGraphNode({
+      mode: graph.mode,
+      index,
+      scopeId,
+      position: position ?? { x: 180 + index * 22, y: 160 + index * 18 },
+    });
+    update((current) => ({ ...current, nodes: [...current.nodes, node] }));
+    setSelectedNodeId(node.id);
+  };
+  const addVariableFromPalette = () => {
+    const entries = [...set.blackboard];
+    let suffix = 1;
+    while (entries.some((entry) => entry.key === `새변수${suffix}`)) suffix += 1;
+    const next = [
+      ...entries,
+      {
+        key: `새변수${suffix}`,
+        type: "Float" as const,
+        defaultValue: "0",
+        liveValue: "0",
+        source: "패턴",
+      },
+    ];
+    updateBlackboard(next);
+    setDrawerTab("context");
+    announce("변수를 추가했습니다. 하단 문맥에서 편집하세요.");
+  };
+  const addFromBehaviorPalette = (paletteId: BehaviorPaletteId, position?: Point) => {
+    if (paletteId === "variable") {
+      addVariableFromPalette();
+      return;
+    }
+    if (paletteId === "condition") {
+      addConditionNode(position);
+      return;
+    }
+    const mapped: Record<"situation" | "action" | "decision", DomainEntityKind> = {
+      situation: "state",
+      action: "action",
+      decision: "decision",
+    };
+    addDomainNode(mapped[paletteId], position);
+  };
+  const addInterruptRule = (targetNodeId: string) => {
+    const scopeId = activeScopeId ?? graph.rootScopeId;
+    const anyNode = findScopeSystemNode(graphRef.current, "any", scopeId);
+    const target = graphRef.current.nodes.find((node) => node.id === targetNodeId);
+    if (!anyNode || !target || isSystemNode(target)) {
+      announce("이동할 상황을 먼저 선택하세요.");
+      return;
+    }
+    connectNodes(anyNode.id, target.id, { forceInterrupt: true });
+    announce(`${ANYWHERE_INTERRUPT_LABEL} → ‘${target.name}’. ${FLOW_CONDITION_PROMPT}`);
+  };
+  const addExitReturnRule = (sourceNodeId: string) => {
+    const scopeId = activeScopeId ?? graph.rootScopeId;
+    const exitNode = findScopeSystemNode(graphRef.current, "exit", scopeId);
+    const source = graphRef.current.nodes.find((node) => node.id === sourceNodeId);
+    if (!exitNode || !source || isSystemNode(source)) {
+      announce("종료할 상황을 선택하세요.");
+      return;
+    }
+    connectNodes(source.id, exitNode.id);
+    announce(`‘${source.name}’에서 종료/복귀 규칙을 추가했습니다.`);
   };
   const addSubmachine = (position?: Point) => {
     if (graph.mode === "bt") return;
     const parentScopeId = activeScopeId ?? getRootScope(graph)?.id;
     if (!parentScopeId) return;
-    const result = createChildMachine(graphRef.current, parentScopeId, `하위 상태 머신 ${graph.scopes.length}`, position);
+    const result = createChildMachine(graphRef.current, parentScopeId, `행동 묶음 ${graph.scopes.length}`, position);
     if (!update(() => result.graph)) return;
     setSelectedNodeId(result.ownerNodeId);
     setSelectedEdgeId(undefined);
-    announce("하위 상태 머신을 만들었습니다. 두 번 클릭해 들어갈 수 있습니다.");
+    announce("행동 묶음을 만들었습니다. 두 번 클릭해 들어갈 수 있습니다.");
   };
   const setDefaultState = (nodeId: string) => {
     const node = graphRef.current.nodes.find((item) => item.id === nodeId);
@@ -306,7 +454,7 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
       scopes: current.scopes.map((scope) => scope.id === node.scopeId ? { ...scope, initialNodeId: node.id } : scope),
       initialNodeId: current.rootScopeId === node.scopeId ? node.id : current.initialNodeId,
     }));
-    announce(`‘${node.name}’을(를) 기본 상태로 지정했습니다.`);
+    announce(`‘${node.name}’을(를) 시작 상황으로 지정했습니다.`);
   };
   const deleteNodeById = (nodeId: string) => {
     setSelectedNodeId(nodeId);
@@ -324,20 +472,59 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
     if (isCompactLayout()) setSidebarOpen(false);
     setViewportCommand((current) => ({ id: (current?.id ?? 0) + 1, type: "fit-all" }));
   };
-  const connectNodes = (source: string, target: string) => {
+  const connectNodes = (source: string, target: string, options?: { forceInterrupt?: boolean }) => {
+    const currentGraph = graphRef.current;
+    const link = classifyAuthoringLink(currentGraph, source, target);
+    if (!link.ok && !options?.forceInterrupt) {
+      announce(link.message);
+      return;
+    }
+    if (currentGraph.edges.some((edge) => edge.source === source && edge.target === target)) {
+      const existing = currentGraph.edges.find((edge) => edge.source === source && edge.target === target);
+      if (existing) {
+        setSelectedNodeId(undefined);
+        setSelectedEdgeId(existing.id);
+        announce("이미 같은 흐름이 있습니다. 조건을 편집하세요.");
+      }
+      return;
+    }
     const edgeId = `${graph.mode}-edge-${crypto.randomUUID()}`;
-    update((current) => current.edges.some((edge) => edge.source === source && edge.target === target) ? current : ({
+    const promptCondition = Boolean(link.promptCondition || options?.forceInterrupt || link.kind === "interrupt");
+    const isDecisionCandidate = link.kind === "decision-action";
+    const triggerType: GraphEdge["triggerType"] = promptCondition && !isDecisionCandidate ? "condition" : "always";
+    const interruptPolicy: GraphEdge["interruptPolicy"] = options?.forceInterrupt || link.kind === "interrupt" ? "immediate" : "after-action";
+    update((current) => ({
       ...current,
       edges: [...current.edges, {
         id: edgeId,
         source,
         target,
         priority: current.edges.length,
-        ...(graph.mode === "bt" ? {} : { triggerType: "always" as const, interruptPolicy: "after-action" as const }),
+        ...(graph.mode === "bt" ? {} : {
+          triggerType,
+          interruptPolicy,
+          ...(promptCondition && !isDecisionCandidate
+            ? { conditions: [{ id: crypto.randomUUID(), key: "", operator: "==" as const, value: "true" }] }
+            : {}),
+        }),
       }],
     }));
     setSelectedNodeId(undefined);
     setSelectedEdgeId(edgeId);
+    if (link.message) announce(link.message);
+  };
+
+  const createContextVariable = (displayName: string, key?: string) => {
+    const current = blackboardRef.current;
+    const entry = createContextVariableEntry(displayName, {
+      key,
+      existingKeys: current.map((item) => item.key),
+    });
+    const next = [...current, entry];
+    blackboardRef.current = next;
+    updateBlackboard(next);
+    announce(`문맥 값 ‘${entry.displayName ?? entry.key}’을(를) 만들었습니다.`);
+    return entry;
   };
   const renameSelectedNode = (name: string) => selectedNodeId && update((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === selectedNodeId ? { ...node, name } : node) }));
   const updateSelectedNode = (nextNode: GraphNode) => update((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === nextNode.id ? nextNode : node) }));
@@ -413,13 +600,19 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
     }));
   };
   const updateBlackboard = (blackboard: BlackboardEntry[]) => {
+    const currentSet = setRef.current;
     blackboard.forEach((entry) => {
-      const previous = set.blackboard.find((item) => item.key === entry.key);
+      const previous = currentSet.blackboard.find((item) => item.key === entry.key);
       if (previous?.liveValue !== entry.liveValue) runtimeRef.current?.setBlackboardValue(entry.key, entry.liveValue);
     });
-    onSetUpdate(touchSet({ ...set, blackboard }));
+    // Merge onto latest set + graphRef so in-flight graph edits are not wiped.
+    const graphs = currentSet.graphs.map((item) => item.id === graphRef.current.id ? graphRef.current : item);
+    const nextSet = touchSet({ ...currentSet, graphs, blackboard });
+    setRef.current = nextSet;
+    blackboardRef.current = blackboard;
+    onSetUpdate(nextSet);
   };
-  const updateCatalog = (actions: PatternSet["actions"], conditions: PatternSet["conditions"]) => onSetUpdate(touchSet({ ...set, actions, conditions }));
+  const updateCatalog = (actions: PatternSet["actions"], conditions: PatternSet["conditions"]) => onSetUpdate(touchSet({ ...setRef.current, actions, conditions }));
   const openDrawer = (tab: DrawerTab) => setDrawerTab((current) => current === tab ? undefined : tab);
   const exportPattern = async (target: "ir" | "diagnostics" | EngineExportTarget) => {
     const baseName = safeFileName(set.name);
@@ -538,22 +731,33 @@ function GraphWorkbench({ set, graph, selectedGraphId, onGraphChange, onGraphCre
 
   return (
     <div className="editor-app">
-      <EditorChrome setName={set.name} graphName={graph.name} graphMode={graph.mode} runtimeState={runtimeState} runtimeEngine={runtimeSnapshot.engine} tick={runtimeSnapshot.tick} issueCount={issues.length} sidebarOpen={sidebarOpen} onSidebarToggle={toggleSidebar} onRuntimeStateChange={changeRuntimeState} onStep={stepRuntime} onValidationOpen={() => openDrawer("validation")} onExport={exportPattern} onBackToLibrary={onBack} />
+      <EditorChrome setName={set.name} graphName={graph.name} graphMode={graph.mode} runtimeState={runtimeState} runtimeEngine={runtimeSnapshot.engine} tick={runtimeSnapshot.tick} issueCount={issues.length} issueSummary={issues[0]?.message} sidebarOpen={sidebarOpen} onSidebarToggle={toggleSidebar} onRuntimeStateChange={changeRuntimeState} onStep={stepRuntime} onValidationOpen={() => openDrawer("validation")} onExport={exportPattern} onBackToLibrary={onBack} />
       <main className={`workbench-shell ${sidebarOpen ? "sidebar-open" : "sidebar-closed"} ${selectedNode || selectedEdge ? "inspector-open" : "inspector-closed"}`}>
         {sidebarOpen && <HierarchyPanel setName={set.name} graphs={set.graphs} graph={graph} selectedGraphId={selectedGraphId} selectedNodeId={selectedNodeId} activeScopeId={activeScopeId} onGraphChange={selectGraph} onGraphCreate={onGraphCreate} onGraphRename={onGraphRename} onGraphDuplicate={onGraphDuplicate} onGraphDelete={onGraphDelete} onNodeSelect={selectNode} onScopeOpen={openScope} />}
         <section className="canvas-column">
           <header className="document-header">
-            <div className="document-path"><span>그래프</span><ChevronRight size={13} /><strong>{graph.name}</strong>{graph.mode === "state-machine" && scopePath(graph, activeScopeId).map((scope) => <span className="scope-crumb" key={scope.id}><ChevronRight size={12} /><button onClick={() => openScope(scope.id)}>{scope.name}</button></span>)}<span className={`mode-badge mode-${graph.mode}`}>{modeLabel(graph.mode)}</span></div>
+            <div className="document-path"><span>행동</span><ChevronRight size={13} /><strong>{graph.name}</strong>{graph.mode === "state-machine" && scopePath(graph, activeScopeId).map((scope) => <span className="scope-crumb" key={scope.id}><ChevronRight size={12} /><button onClick={() => openScope(scope.id)}>{scope.name}</button></span>)}<span className={`mode-badge mode-${graph.mode}`}>{modeLabel()}</span></div>
             <div className="document-status">
-              <button className={issues.length ? "has-issues" : "is-valid"} onClick={() => openDrawer("validation")}>{issues.length ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}{issues.length ? `${issues.length}개 확인 필요` : "구조 유효"}</button>
-              {!selectedNode && !selectedEdge && <button onClick={() => selectNode(graph.nodes[0]?.id)}><PanelRightOpen size={14} />속성 열기</button>}
+              <button
+                className={issues.length ? "has-issues" : "is-valid"}
+                onClick={() => openDrawer("validation")}
+                title={issues.length ? issues.map((issue) => issue.message).join(" · ") : "구조 검증 통과"}
+              >
+                {issues.length ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                {issues.length
+                  ? (issues.length === 1
+                    ? issues[0]!.message
+                    : `${issues.length}개 확인 필요 · ${issues[0]!.message}`)
+                  : "구조 유효"}
+              </button>
+              {!selectedNode && !selectedEdge && <button onClick={() => selectNode(firstSelectableNodeId(graph, activeScopeId))}><PanelRightOpen size={14} />속성 열기</button>}
             </div>
           </header>
-          <GraphEditor graph={graph} graphMode={graph.mode} scopeId={activeScopeId} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} activeNodeId={activeNodeId} runtimeState={runtimeState} runtimeNodeStates={runtimeSnapshot.nodeStates} onNodeSelect={selectNode} onEdgeSelect={selectEdge} onNodeMove={moveNode} onNodesLayout={layoutNodes} onNodeAdd={addNode} onSubmachineAdd={addSubmachine} onScopeOpen={openScope} onSetDefaultState={setDefaultState} onNodeDelete={deleteNodeById} onEdgeConnect={connectNodes} viewportCommand={viewportCommand} onShortcutHelp={() => setShortcutHelpOpen(true)} />
-          <BottomPanel activeTab={drawerTab} issues={issues} blackboard={set.blackboard} actions={set.actions} conditions={set.conditions} trace={runtimeSnapshot.trace} engine={runtimeSnapshot.engine} tick={runtimeSnapshot.tick} coverage={runtimeSnapshot.coverage} stateDurationsMs={runtimeSnapshot.stateDurationsMs} failedConditions={runtimeSnapshot.failedConditions} lastSignal={runtimeSnapshot.lastSignal} onBlackboardChange={updateBlackboard} onCatalogChange={updateCatalog} onEventSend={sendRuntimeEvent} onSeek={seekRuntime} onTabChange={openDrawer} onClose={() => setDrawerTab(undefined)} />
+          <GraphEditor graph={graph} graphMode={graph.mode} scopeId={activeScopeId} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} activeNodeId={activeNodeId} runtimeState={runtimeState} runtimeNodeStates={runtimeSnapshot.nodeStates} onNodeSelect={selectNode} onEdgeSelect={selectEdge} onNodeMove={moveNode} onNodesLayout={layoutNodes} onNodeAdd={addNode} onDomainNodeAdd={addDomainNode} onBehaviorPaletteAdd={addFromBehaviorPalette} onSubmachineAdd={addSubmachine} onScopeOpen={openScope} onSetDefaultState={setDefaultState} onNodeDelete={deleteNodeById} onEdgeConnect={connectNodes} onConnectRejected={announce} onAddInterrupt={addInterruptRule} onAddExitReturn={addExitReturnRule} viewportCommand={viewportCommand} onShortcutHelp={() => setShortcutHelpOpen(true)} simulationActive={runtimeState !== "stopped" || drawerTab === "simulation"} blackboard={set.blackboard} />
+          <BottomPanel activeTab={drawerTab} issues={issues} blackboard={set.blackboard} actions={set.actions} conditions={set.conditions} trace={runtimeSnapshot.trace} engine={runtimeSnapshot.engine} tick={runtimeSnapshot.tick} coverage={runtimeSnapshot.coverage} stateDurationsMs={runtimeSnapshot.stateDurationsMs} failedConditions={runtimeSnapshot.failedConditions} lastSignal={runtimeSnapshot.lastSignal} onBlackboardChange={updateBlackboard} onCatalogChange={updateCatalog} onEventSend={sendRuntimeEvent} onSeek={seekRuntime} onTabChange={openDrawer} selectedNode={selectedNode} graph={graph} nameLookup={Object.fromEntries(graph.nodes.map((n) => [n.id, n.name]))} simulationActive={runtimeState !== "stopped" || drawerTab === "simulation"} onClose={() => setDrawerTab(undefined)} />
         </section>
         {selectedNode && <InspectorPanel graph={graph} graphMode={graph.mode} selectedNode={selectedNode} actionDefinitions={set.actions} runtimeState={runtimeState} runtimeNodeState={runtimeSnapshot.nodeStates[selectedNode.id]} onNodeNameChange={renameSelectedNode} onNodeChange={updateSelectedNode} onScopeChange={updateScope} onSetDefaultState={setDefaultState} onScopeOpen={openScope} onNodeDelete={() => deleteSelectedNode()} onTransitionSelect={selectEdge} onClose={() => selectNode(undefined)} />}
-        {selectedEdge && <TransitionInspectorPanel graph={graph} edge={selectedEdge} blackboard={set.blackboard} onChange={updateSelectedEdge} onDelete={() => deleteSelectedEdge()} onClose={() => selectEdge(undefined)} />}
+        {selectedEdge && <TransitionInspectorPanel graph={graph} edge={selectedEdge} blackboard={set.blackboard} onChange={updateSelectedEdge} onDelete={() => deleteSelectedEdge()} onClose={() => selectEdge(undefined)} onCreateContextVariable={createContextVariable} />}
       </main>
       {createDialog}
       {shortcutHelpOpen && <ShortcutHelpDialog onClose={() => setShortcutHelpOpen(false)} />}
@@ -579,7 +783,32 @@ function isCompactLayout(): boolean {
     || (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches);
 }
 
+function graphHasRunnableSituations(graph: GraphDefinition): boolean {
+  return graph.nodes.some((node) => !isSystemNode(node) && (node.kind === "state" || node.kind === "submachine" || node.kind === "task" || node.kind === "selector"));
+}
+
+function emptyRuntimeSnapshot(graph: GraphDefinition): PatternRuntimeSnapshot {
+  return {
+    engine: graph.mode === "bt" ? "Mistreevous" : "XState",
+    state: "stopped",
+    tick: 0,
+    activeNodeId: undefined,
+    activePath: [],
+    coverage: {},
+    stateDurationsMs: {},
+    failedConditions: [],
+    nodeStates: {},
+    replay: [],
+    trace: [],
+  };
+}
+
 function createSnapshot(graph: GraphDefinition, blackboard: BlackboardEntry[] = []): PatternRuntimeSnapshot {
+  // Empty Behavior (no situations yet) is a valid authoring state — skip runtime build.
+  if (!graphHasRunnableSituations(graph)) {
+    void blackboard;
+    return emptyRuntimeSnapshot(graph);
+  }
   const runtime = createPatternRuntime(graph, blackboard);
   const snapshot = runtime.getSnapshot();
   runtime.dispose();
@@ -608,6 +837,8 @@ function safeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]/g, "_").trim() || "pattern-set";
 }
 
-function modeLabel(mode: GraphMode): string {
-  return mode === "bt" ? "행동 트리" : "상태 머신";
+function modeLabel(): string {
+  return "행동 캔버스";
 }
+
+

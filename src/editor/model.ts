@@ -22,6 +22,11 @@ export interface Point {
 }
 
 export interface GraphNode {
+  /**
+   * PR2 domain payload (State/Action/Decision). Optional and additive —
+   * missing payload is inferred from kind via resolveDomainEntityKind().
+   */
+  domain?: import("./domain").NodeDomainPayload;
   id: string;
   name: string;
   kind: GraphNodeKind;
@@ -123,10 +128,17 @@ export interface GraphDefinition {
   groups: GraphGroup[];
   initialNodeId?: string;
   rootNodeId?: string;
+  /**
+   * Compatibility / research samples (FSM·HFSM·BT names).
+   * Hidden from the default pattern list; shown under 고급 · 레거시 예제.
+   */
+  legacyExample?: boolean;
 }
 
 export interface BlackboardEntry {
   key: string;
+  /** Planner-facing label. Prefer this in default UX; key stays for runtime/export. */
+  displayName?: string;
   type: "Object" | "Float" | "Bool" | "Int" | "Vector" | "String" | "Enum";
   defaultValue: string;
   liveValue: string;
@@ -190,6 +202,11 @@ export interface EditorProject {
 }
 
 export interface PatternSet {
+  /**
+   * PR2 dual-write snapshot of PatternDefinition per graph.
+   * Rebuilt on save from graphs + blackboard; does not replace GraphDefinition.
+   */
+  patternDefinitions?: import("./domain").PatternDefinition[];
   id: string;
   name: string;
   description?: string;
@@ -208,5 +225,7 @@ export interface PatternLibrary {
   sets: PatternSet[];
 }
 
-export type DrawerTab = "validation" | "blackboard" | "catalog" | "trace";
+/** Bottom IA: 문맥 | 시뮬레이션 | 검증 | 리뷰 (UX consolidation). Legacy tab ids removed from UI. */
+export type DrawerTab = "context" | "simulation" | "validation" | "review";
 export type RuntimeState = "stopped" | "playing" | "paused";
+

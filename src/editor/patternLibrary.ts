@@ -9,8 +9,9 @@ import type {
   PatternSet,
   StateMachineScope,
 } from "./model";
-import { sampleProject } from "./sampleProject";
+import { createGuardBehaviorGraph, sampleProject } from "./sampleProject";
 import { ensureAllScopeSystemNodes } from "./stateMachine";
+import { ensureNodeDomain, syncPatternDefinitions } from "./domain";
 
 const STORAGE_PREFIX = "game-design-studio.pattern-library.v2";
 const LEGACY_STORAGE_PREFIX = "game-design-studio.pattern-library.v1";
@@ -94,10 +95,11 @@ export function createPatternSet(name: string, description = ""): PatternSet {
     actions: [],
     conditions: [],
     templates: [],
+    patternDefinitions: [],
   };
 }
 
-export function createGraph(mode: GraphMode, name: string): GraphDefinition {
+export function createGraph(mode: GraphMode, name: string, description = ""): GraphDefinition {
   const now = new Date().toISOString();
   const graphId = crypto.randomUUID();
   const starter = starterGraph(mode, graphId);
@@ -105,6 +107,7 @@ export function createGraph(mode: GraphMode, name: string): GraphDefinition {
     id: graphId,
     mode,
     name: name.trim() || defaultGraphName(mode),
+    description: description.trim() || undefined,
     createdAt: now,
     updatedAt: now,
     ...starter,
@@ -113,22 +116,31 @@ export function createGraph(mode: GraphMode, name: string): GraphDefinition {
 
 export function createSamplePatternSet(): PatternSet {
   const now = new Date().toISOString();
-  return {
+  const guard = normalizeGraph(createGuardBehaviorGraph());
+  const legacy = Object.values(sampleProject.graphs).map((graph) => ({ ...normalizeGraph(graph), legacyExample: true, createdAt: now, updatedAt: now }));
+  return syncPatternDefinitions({
     id: crypto.randomUUID(),
-    name: "Cinder Knight 예제",
-    description: "계층 상태 머신과 행동 트리를 함께 살펴보는 예제 세트입니다.",
+    name: "경비·전투 예제",
+    description: "순찰 → 발견 → 경계 → 판단 → 공격/지원/후퇴. 멀면 접근 목표·실행 계획으로 이어지는 예제입니다.",
     createdAt: now,
     updatedAt: now,
-    graphs: Object.values(sampleProject.graphs).map((graph) => ({ ...normalizeGraph(graph), createdAt: now, updatedAt: now })),
-    blackboard: structuredClone(sampleProject.blackboard),
+    graphs: [{ ...guard, createdAt: now, updatedAt: now }, ...legacy],
+    blackboard: [
+      { key: "플레이어 거리", type: "Float", defaultValue: "8", liveValue: "8", source: "센서" },
+      { key: "아군 수", type: "Int", defaultValue: "1", liveValue: "1", source: "센서" },
+      { key: "내 HP", type: "Float", defaultValue: "100", liveValue: "100", source: "상태" },
+      { key: "CooldownReady", type: "Bool", defaultValue: "true", liveValue: "true", source: "쿨다운" },
+      ...structuredClone(sampleProject.blackboard),
+    ],
     actions: defaultActions(),
     conditions: defaultConditions(),
     templates: [],
-  };
+    patternDefinitions: [],
+  });
 }
 
 export function touchSet(set: PatternSet): PatternSet {
-  return { ...set, updatedAt: new Date().toISOString() };
+  return syncPatternDefinitions({ ...set, updatedAt: new Date().toISOString() });
 }
 
 export function duplicateGraphDefinition(source: GraphDefinition): GraphDefinition {
@@ -174,19 +186,21 @@ export function normalizeGraph(input: unknown): GraphDefinition {
     ? structuredClone(raw.scopes as StateMachineScope[])
     : [];
 
+  const legacyExample = raw.legacyExample === true;
   if (mode === "bt") {
     return {
       id,
       mode,
-      name: stringValue(raw.name) || "새 행동 트리",
+      name: stringValue(raw.name) || "새 행동 패턴",
       description: stringValue(raw.description),
       createdAt: stringValue(raw.createdAt),
       updatedAt: stringValue(raw.updatedAt),
-      nodes: nodes.map((node) => ({ ...node, scopeId: undefined, parentId: undefined })),
+      nodes: nodes.map((node) => ensureNodeDomain({ ...node, scopeId: undefined, parentId: undefined })),
       edges,
       scopes: [],
       groups: [],
       rootNodeId: stringValue(raw.rootNodeId) || nodes[0]?.id,
+      legacyExample: legacyExample || undefined,
     };
   }
 
@@ -202,7 +216,7 @@ export function normalizeGraph(input: unknown): GraphDefinition {
     scopes.unshift(rootScope(rootScopeId, "루트"));
   }
 
-  const normalizedNodes = nodes.map((node) => ({
+  const normalizedNodes = nodes.map((node) => ensureNodeDomain({
     ...node,
     kind: node.kind === ("compound" as GraphNode["kind"]) ? "submachine" as const : node.kind,
     scopeId: node.scopeId || node.parentId || rootScopeId,
@@ -222,7 +236,7 @@ export function normalizeGraph(input: unknown): GraphDefinition {
           scopeId: group.parentId || rootScopeId,
           childScopeId: group.id,
           position: { ...group.position },
-          subtitle: "하위 상태 머신",
+          subtitle: "행동 묶음",
           parentId: undefined,
         });
       }
@@ -241,7 +255,7 @@ export function normalizeGraph(input: unknown): GraphDefinition {
   return ensureAllScopeSystemNodes({
     id,
     mode,
-    name: stringValue(raw.name) || "새 상태 머신",
+    name: stringValue(raw.name) || "새 행동 패턴",
     description: stringValue(raw.description),
     createdAt: stringValue(raw.createdAt),
     updatedAt: stringValue(raw.updatedAt),
@@ -251,6 +265,7 @@ export function normalizeGraph(input: unknown): GraphDefinition {
     rootScopeId,
     groups: [],
     initialNodeId: root?.initialNodeId ?? initialNodeId,
+    legacyExample: legacyExample || undefined,
   });
 }
 
@@ -258,7 +273,7 @@ function normalizePatternSet(input: unknown): PatternSet | undefined {
   const raw = asRecord(input);
   if (!raw) return undefined;
   const now = new Date().toISOString();
-  return {
+  const set: PatternSet = {
     id: stringValue(raw.id) || crypto.randomUUID(),
     name: stringValue(raw.name) || "이름 없는 패턴 세트",
     description: stringValue(raw.description),
@@ -269,7 +284,9 @@ function normalizePatternSet(input: unknown): PatternSet | undefined {
     actions: Array.isArray(raw.actions) ? structuredClone(raw.actions as PatternSet["actions"]) : [],
     conditions: Array.isArray(raw.conditions) ? structuredClone(raw.conditions as PatternSet["conditions"]) : [],
     templates: Array.isArray(raw.templates) ? structuredClone(raw.templates as PatternSet["templates"]) : [],
+    patternDefinitions: [],
   };
+  return syncPatternDefinitions(set);
 }
 
 function starterGraph(mode: GraphMode, graphId: string): Pick<GraphDefinition, "nodes" | "edges" | "groups" | "scopes" | "rootScopeId" | "initialNodeId" | "rootNodeId"> {
@@ -278,25 +295,24 @@ function starterGraph(mode: GraphMode, graphId: string): Pick<GraphDefinition, "
     const taskId = `${graphId}-task`;
     return {
       nodes: [
-        { id: rootId, name: "Root", kind: "selector", position: { x: 420, y: 150 }, subtitle: "선택" },
-        { id: taskId, name: "첫 행동", kind: "task", position: { x: 420, y: 290 }, subtitle: "행동" },
+        { id: rootId, name: "루트 판단", kind: "selector", position: { x: 420, y: 150 }, subtitle: "판단", domain: { entityKind: "decision", decisionKind: "SELECTOR", weights: {} } },
+        { id: taskId, name: "첫 행동", kind: "task", position: { x: 420, y: 290 }, subtitle: "행동", domain: { entityKind: "action", timing: {}, interruptible: true } },
       ],
       edges: [{ id: `${graphId}-edge-1`, source: rootId, target: taskId, priority: 0 }],
       groups: [], scopes: [], rootNodeId: rootId,
     };
   }
 
+  // PR8: start empty (system Entry/Any/Exit only). Author adds 「첫 상황」 via CTA.
   const scopeId = `${graphId}:root`;
-  const idleId = `${graphId}-idle`;
   const graph: GraphDefinition = {
     id: graphId,
     mode,
-    name: "새 상태 머신",
-    nodes: [{ id: idleId, name: "Idle", kind: "state", scopeId, position: { x: 420, y: 220 }, subtitle: "기본 상태" }],
+    name: "새 행동 패턴",
+    nodes: [],
     edges: [], groups: [],
-    scopes: [{ ...rootScope(scopeId, "루트"), initialNodeId: idleId }],
+    scopes: [{ ...rootScope(scopeId, "루트") }],
     rootScopeId: scopeId,
-    initialNodeId: idleId,
   };
   const ready = ensureAllScopeSystemNodes(graph);
   return {
@@ -305,7 +321,7 @@ function starterGraph(mode: GraphMode, graphId: string): Pick<GraphDefinition, "
     groups: [],
     scopes: ready.scopes,
     rootScopeId: scopeId,
-    initialNodeId: idleId,
+    initialNodeId: undefined,
   };
 }
 
@@ -328,7 +344,7 @@ function rootScope(id: string, name: string): StateMachineScope {
 }
 
 function defaultGraphName(mode: GraphMode): string {
-  return mode === "bt" ? "새 행동 트리" : "새 상태 머신";
+  return mode === "bt" ? "새 행동 설계" : "새 행동 패턴";
 }
 
 function defaultActions(): PatternSet["actions"] {

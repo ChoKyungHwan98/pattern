@@ -21,7 +21,7 @@ describe("transition semantics", () => {
       ],
     };
     expect(isTransitionEligible(edge, blackboard)).toBe(true);
-    expect(summarizeTransition(edge)).toBe("DistanceToTarget <= 3.5 AND HasLineOfSight == true");
+    expect(summarizeTransition(edge)).toBe("DistanceToTarget 작거나 같음 3.5 그리고 HasLineOfSight 같음 true");
   });
 
   it("이벤트 이름이 일치할 때만 이벤트 전환을 실행한다", () => {

@@ -9,7 +9,7 @@ export function patternArtifactRecord(set: PatternSet) {
     title: set.name,
     revision: set.updatedAt,
     fingerprint: `${set.updatedAt}:${set.graphs.length}:${set.graphs.reduce((sum, graph) => sum + graph.nodes.length + graph.edges.length, 0)}`,
-    summary: set.description || `${set.graphs.length}개의 FSM·HFSM·BT 그래프`,
+    summary: set.description || `${set.graphs.length}개의 행동 패턴`,
     data: {
       description: set.description,
       blackboard: set.blackboard.map((entry) => ({ key: entry.key, type: entry.type, defaultValue: entry.defaultValue })),

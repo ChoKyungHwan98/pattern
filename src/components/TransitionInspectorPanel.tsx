@@ -9,6 +9,12 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { useState } from "react";
+import {
+  FLOW_CONDITION_PROMPT,
+  contextEntryLabel,
+  createContextVariableEntry,
+} from "../editor/authoringFlow";
 import type {
   BlackboardEntry,
   ConditionOperator,
@@ -17,7 +23,7 @@ import type {
   TransitionCondition,
   TransitionTriggerType,
 } from "../editor/model";
-import { getTransitionTriggerType, summarizeTransition } from "../editor/transitionSemantics";
+import { getTransitionTriggerType, operatorLabel, summarizeTransition } from "../editor/transitionSemantics";
 
 interface TransitionInspectorPanelProps {
   graph: GraphDefinition;
@@ -26,17 +32,22 @@ interface TransitionInspectorPanelProps {
   onChange: (edge: GraphEdge) => void;
   onDelete: () => void;
   onClose: () => void;
+  onCreateContextVariable?: (displayName: string, key?: string) => BlackboardEntry;
 }
 
 const triggerOptions: Array<{ value: TransitionTriggerType; label: string }> = [
   { value: "always", label: "항상" },
   { value: "condition", label: "조건 충족" },
   { value: "event", label: "이벤트 수신" },
-  { value: "completed", label: "상태 완료" },
+  { value: "completed", label: "행동 완료" },
   { value: "timeout", label: "시간 경과" },
 ];
 
 const operatorOptions: ConditionOperator[] = ["==", "!=", ">", ">=", "<", "<=", "contains"];
+
+function operatorSelectLabel(operator: ConditionOperator): string {
+  return operatorLabel(operator);
+}
 
 export function TransitionInspectorPanel({
   graph,
@@ -45,18 +56,27 @@ export function TransitionInspectorPanel({
   onChange,
   onDelete,
   onClose,
+  onCreateContextVariable,
 }: TransitionInspectorPanelProps) {
-  const source = graph.nodes.find((node) => node.id === edge.source)?.name ?? edge.source;
-  const target = graph.nodes.find((node) => node.id === edge.target)?.name ?? edge.target;
+  const sourceNode = graph.nodes.find((node) => node.id === edge.source);
+  const targetNode = graph.nodes.find((node) => node.id === edge.target);
+  const source = sourceNode?.name ?? edge.source;
+  const target = targetNode?.name ?? edge.target;
+  const isAnywhere = sourceNode?.kind === "any";
+  const flowTitle = isAnywhere ? "어떤 상황에서도" : `${source} → ${target}`;
   const triggerType = getTransitionTriggerType(edge);
   const update = (patch: Partial<GraphEdge>) => onChange({ ...edge, ...patch });
+  const [creatingContext, setCreatingContext] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [showAdvancedKey, setShowAdvancedKey] = useState(false);
+  const [newKey, setNewKey] = useState("");
 
   const changeTrigger = (nextType: TransitionTriggerType) => {
     update({
       triggerType: nextType,
       label: undefined,
       ...(nextType === "condition" && !edge.conditions?.length
-        ? { conditions: [createCondition(blackboard[0]?.key ?? "")] }
+        ? { conditions: [createCondition("")] }
         : {}),
     });
   };
@@ -69,29 +89,64 @@ export function TransitionInspectorPanel({
     });
   };
 
+  const submitNewContext = (conditionId?: string) => {
+    const displayName = newDisplayName.trim();
+    if (!displayName) return;
+    const advancedKey = showAdvancedKey && newKey.trim() ? newKey.trim() : undefined;
+    const created = onCreateContextVariable
+      ? onCreateContextVariable(displayName, advancedKey)
+      : createContextVariableEntry(displayName, {
+          key: advancedKey,
+          existingKeys: blackboard.map((entry) => entry.key),
+        });
+    const key = created.key;
+    if (conditionId) {
+      updateCondition(conditionId, { key });
+    } else {
+      update({
+        triggerType: "condition",
+        conditions: [...(edge.conditions ?? []), createCondition(key)],
+      });
+    }
+    setCreatingContext(false);
+    setNewDisplayName("");
+    setNewKey("");
+    setShowAdvancedKey(false);
+  };
+
   return (
     <aside className="pattern-inspector transition-inspector">
       <header className="inspector-header">
-        <div><span>선택 항목</span><strong>전환 속성</strong></div>
-        <button aria-label="전환 속성 닫기" title="전환 속성 닫기" onClick={onClose}><X size={16} /></button>
+        <div><span>선택 항목</span><strong>흐름 조건</strong></div>
+        <button aria-label="흐름 조건 닫기" title="흐름 조건 닫기" onClick={onClose}><X size={16} /></button>
       </header>
 
       <div className="inspector-scroll">
         <div className="inspector-summary transition-summary">
           <span className="summary-icon"><ArrowRight size={18} /></span>
-          <div><strong>{source} → {target}</strong><span>{summarizeTransition(edge)}</span></div>
+          <div>
+            <strong>{flowTitle}</strong>
+            <span>{isAnywhere ? `${ANYWHERE_HINT} · ${summarizeTransition(edge)}` : summarizeTransition(edge)}</span>
+          </div>
         </div>
 
-        <InspectorSection title="전환 대상" icon={<Link2 size={14} />}>
-          <InspectorField label="출발"><div className="read-only-field">{source}</div></InspectorField>
+        <InspectorSection title="흐름" icon={<Link2 size={14} />}>
+          <InspectorField label="출발">
+            <div className="read-only-field">{isAnywhere ? "어떤 상황에서도" : source}</div>
+          </InspectorField>
           <InspectorField label="도착"><div className="read-only-field">{target}</div></InspectorField>
           <InspectorField label="우선순위">
             <input type="number" value={edge.priority ?? 0} onChange={(event) => update({ priority: Number(event.target.value) || 0 })} />
           </InspectorField>
         </InspectorSection>
 
-        <InspectorSection title="실행 시점" icon={<Zap size={14} />}>
-          <InspectorField label="전환 방식">
+        <InspectorSection title={FLOW_CONDITION_PROMPT} icon={<Zap size={14} />}>
+          <p className="inspector-help flow-condition-lead">
+            {isAnywhere
+              ? "어느 상황에 있어도 이 조건이 맞으면 도착 상황으로 이동합니다."
+              : "이 흐름을 언제 탈지 적어 주세요. 예: 가까움 = 참, 공격받음 = 참"}
+          </p>
+          <InspectorField label="조건 종류">
             <select value={triggerType} onChange={(event) => changeTrigger(event.target.value as TransitionTriggerType)}>
               {triggerOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
             </select>
@@ -99,7 +154,7 @@ export function TransitionInspectorPanel({
 
           {triggerType === "event" && (
             <InspectorField label="이벤트">
-              <input value={edge.eventName ?? edge.trigger ?? edge.label ?? ""} placeholder="예: Enemy.Hit" onChange={(event) => update({ eventName: event.target.value, trigger: undefined, label: undefined })} />
+              <input value={edge.eventName ?? edge.trigger ?? edge.label ?? ""} placeholder="예: 플레이어 발견" onChange={(event) => update({ eventName: event.target.value, trigger: undefined, label: undefined })} />
             </InspectorField>
           )}
 
@@ -119,28 +174,119 @@ export function TransitionInspectorPanel({
               </InspectorField>
               <div className="transition-condition-list">
                 {(edge.conditions ?? []).map((condition) => (
-                  <div className="transition-condition-editor" key={condition.id}>
-                    <select aria-label="블랙보드 키" value={condition.key} onChange={(event) => updateCondition(condition.id, { key: event.target.value })}>
-                      <option value="">변수 선택</option>
-                      {blackboard.map((entry) => <option value={entry.key} key={entry.key}>{entry.key}</option>)}
+                  <div className="condition-builder-row" key={condition.id}>
+                    <select
+                      aria-label="문맥 값"
+                      value={condition.key}
+                      onChange={(event) => {
+                        if (event.target.value === "__create__") {
+                          setCreatingContext(true);
+                          return;
+                        }
+                        updateCondition(condition.id, { key: event.target.value });
+                      }}
+                    >
+                      <option value="">문맥 값 선택</option>
+                      {blackboard.map((entry) => (
+                        <option value={entry.key} key={entry.key}>{contextEntryLabel(entry)}</option>
+                      ))}
+                      <option value="__create__">＋ 새 문맥 값 만들기…</option>
                     </select>
-                    <select aria-label="비교 연산자" value={condition.operator} onChange={(event) => updateCondition(condition.id, { operator: event.target.value as ConditionOperator })}>
-                      {operatorOptions.map((operator) => <option value={operator} key={operator}>{operator}</option>)}
+                    <select aria-label="비교" value={condition.operator} onChange={(event) => updateCondition(condition.id, { operator: event.target.value as ConditionOperator })}>
+                      {operatorOptions.map((operator) => <option value={operator} key={operator}>{operatorSelectLabel(operator)}</option>)}
                     </select>
-                    <input aria-label="비교 값" value={condition.value} placeholder="값" onChange={(event) => updateCondition(condition.id, { value: event.target.value })} />
+                    <input aria-label="값" value={condition.value} placeholder="예: true" onChange={(event) => updateCondition(condition.id, { value: event.target.value })} />
                     <button aria-label="조건 삭제" title="조건 삭제" onClick={() => update({ conditions: edge.conditions?.filter((item) => item.id !== condition.id) })}><X size={13} /></button>
                   </div>
                 ))}
               </div>
+
+              {creatingContext && (
+                <div className="inline-context-create" data-testid="inline-context-create">
+                  <strong>새 문맥 값 만들기</strong>
+                  <label className="inspector-field">
+                    <span>표시 이름</span>
+                    <input
+                      autoFocus
+                      aria-label="문맥 표시 이름"
+                      placeholder="예: 가까움, 공격받음"
+                      value={newDisplayName}
+                      onChange={(event) => setNewDisplayName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          const empty = (edge.conditions ?? []).find((item) => !item.key);
+                          submitNewContext(empty?.id);
+                        }
+                      }}
+                    />
+                  </label>
+                  <details
+                    className="inspector-advanced"
+                    open={showAdvancedKey}
+                    onToggle={(event) => setShowAdvancedKey((event.target as HTMLDetailsElement).open)}
+                  >
+                    <summary>고급 · 키</summary>
+                    <div className="inspector-advanced-body">
+                      <label className="inspector-field">
+                        <span>키 (자동 생성 가능)</span>
+                        <input
+                          aria-label="문맥 키"
+                          placeholder="비우면 표시 이름으로 만듭니다"
+                          value={newKey}
+                          onChange={(event) => setNewKey(event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  </details>
+                  <div className="inline-context-actions">
+                    <button type="button" className="secondary-button" onClick={() => { setCreatingContext(false); setNewDisplayName(""); }}>취소</button>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      data-testid="confirm-new-context"
+                      disabled={!newDisplayName.trim()}
+                      onClick={() => {
+                        const empty = (edge.conditions ?? []).find((item) => !item.key);
+                        submitNewContext(empty?.id);
+                      }}
+                    >
+                      만들기
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!creatingContext && (
+                <button
+                  type="button"
+                  className="inspector-add-button"
+                  data-testid="create-context-inline"
+                  onClick={() => setCreatingContext(true)}
+                >
+                  <Plus size={13} /> 새 문맥 값 만들기
+                </button>
+              )}
+
+              <p className="inspector-help">예: 가까움 = 참 — 캔버스에도 같은 문장으로 표시됩니다.</p>
+              <details className="inspector-advanced">
+                <summary>고급 · 원문 조건</summary>
+                <div className="inspector-advanced-body">
+                  <InspectorField label="원문 (선택)">
+                    <input value={edge.guard ?? ""} placeholder="예: distance < 5" onChange={(event) => update({ guard: event.target.value || undefined })} />
+                  </InspectorField>
+                </div>
+              </details>
               <button className="inspector-add-button" onClick={() => update({ conditions: [...(edge.conditions ?? []), createCondition(blackboard[0]?.key ?? "")] })}>
                 <Plus size={13} /> 조건 추가
               </button>
-              {blackboard.length === 0 && <p className="inspector-help">블랙보드 패널에서 변수를 먼저 추가하세요.</p>}
+              {blackboard.length === 0 && !creatingContext && (
+                <p className="inspector-help">문맥 값이 없습니다. 「새 문맥 값 만들기」로 바로 추가하세요.</p>
+              )}
             </>
           )}
         </InspectorSection>
 
-        <InspectorSection title="전환 정책" icon={<Clock3 size={14} />}>
+        <InspectorSection title="고급 정책" icon={<Clock3 size={14} />}>
           <InspectorField label="인터럽트">
             <select value={edge.interruptPolicy ?? "after-action"} onChange={(event) => update({ interruptPolicy: event.target.value as GraphEdge["interruptPolicy"] })}>
               <option value="after-action">현재 행동 완료 후</option>
@@ -160,12 +306,14 @@ export function TransitionInspectorPanel({
         </InspectorSection>
 
         <section className="inspector-danger-zone">
-          <button onClick={onDelete}><Trash2 size={14} /> 전환 삭제</button>
+          <button onClick={onDelete}><Trash2 size={14} /> 흐름 삭제</button>
         </section>
       </div>
     </aside>
   );
 }
+
+const ANYWHERE_HINT = "어느 상황에서나";
 
 function createCondition(key: string): TransitionCondition {
   return { id: crypto.randomUUID(), key, operator: "==", value: "true" };

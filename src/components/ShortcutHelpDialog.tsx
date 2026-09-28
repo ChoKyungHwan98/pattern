@@ -42,7 +42,7 @@ export function ShortcutHelpDialog({ onClose }: { onClose: () => void }) {
           <span><Keyboard size={17} /></span>
           <div>
             <strong id="shortcut-dialog-title">편집기 단축키</strong>
-            <small>Unity 편집 흐름에 맞춘 그래프 명령</small>
+            <small>행동 캔버스 편집 단축키</small>
           </div>
           <button aria-label="단축키 닫기" onClick={onClose}><X size={16} /></button>
         </header>

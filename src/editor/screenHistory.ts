@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
 
+export function isStudioHosted(): boolean {
+  if (typeof window === "undefined" || window.parent === window) return false;
+  return new URLSearchParams(window.location.search).get("host") === "studio";
+}
+
 const TOOL_NAVIGATION_CHANNEL = "game-design-studio:tool-navigation";
 
 /**
@@ -35,7 +40,7 @@ export function useScreenHistory(screen: string | undefined, go: (screen: string
       goRef.current(target);
       return true;
     };
-    const hosted = new URLSearchParams(window.location.search).get("host") === "studio" && window.parent !== window;
+    const hosted = isStudioHosted();
     const swallow = (event: MouseEvent) => { if (event.button === 3 || event.button === 4) event.preventDefault(); };
     const onMouseUp = (event: MouseEvent) => {
       if (event.button !== 3 && event.button !== 4) return;

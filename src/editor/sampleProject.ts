@@ -556,7 +556,7 @@ function normalizeSampleGraph(input: LegacySampleGraph): GraphDefinition {
       scopeId: group.parentId || rootScopeId,
       childScopeId: group.id,
       position: { ...group.position },
-      subtitle: "하위 상태 머신",
+      subtitle: "행동 묶음",
       parentId: undefined,
     });
   });
@@ -572,3 +572,216 @@ function normalizeSampleGraph(input: LegacySampleGraph): GraphDefinition {
     rootScopeId,
   });
 }
+
+
+/** PR3 demo — readable Situation → Decision → Action flow on the Behavior Canvas. */
+export function createGuardBehaviorGraph(): GraphDefinition {
+  const graphId = "graph-guard-behavior";
+  const scopeId = `${graphId}:root`;
+  const patrol = "guard-patrol";
+  const alert = "guard-alert";
+  const decide = "guard-decide";
+  const attack = "guard-attack";
+  const support = "guard-support";
+  const retreat = "guard-retreat";
+  const graph: GraphDefinition = {
+    id: graphId,
+    mode: "state-machine",
+    name: "경비 행동",
+    description: "순찰 → 발견 → 경계 → 판단 → 공격/지원/후퇴 (멀면 접근 목표·실행 계획)",
+    nodes: [
+      { id: patrol, name: "순찰", kind: "state", scopeId, position: { x: 80, y: 200 }, subtitle: "상황", domain: { entityKind: "state", timing: {} }, description: "지정 경로를 돌며 주변을 살핍니다." },
+      { id: alert, name: "경계", kind: "state", scopeId, position: { x: 320, y: 200 }, subtitle: "상황", domain: { entityKind: "state", timing: {} }, description: "플레이어를 발견해 경계를 높인 상태" },
+      {
+        id: decide,
+        name: "행동 판단",
+        kind: "state",
+        scopeId,
+        position: { x: 560, y: 200 },
+        subtitle: "판단",
+        domain: {
+          entityKind: "decision",
+          decisionKind: "UTILITY",
+          weights: {},
+          candidateActionIds: [attack, support, retreat],
+          candidates: [
+            {
+              id: "cand-attack",
+              actionNodeId: attack,
+              hardRequirements: [
+                {
+                  id: "req-cd",
+                  variableKey: "CooldownReady",
+                  operator: "is_true",
+                },
+              ],
+              considerations: [
+                {
+                  id: "con-dist-atk",
+                  variableKey: "플레이어 거리",
+                  evalStyle: "closer_better",
+                  range: { min: 0, max: 10, unit: "m" },
+                  influence: "high",
+                  internalWeight: 1,
+                  internalCurve: "inverse",
+                },
+              ],
+            },
+            {
+              id: "cand-support",
+              actionNodeId: support,
+              hardRequirements: [
+                {
+                  id: "req-ally",
+                  variableKey: "아군 수",
+                  operator: "gt",
+                  value: "0",
+                },
+              ],
+              considerations: [
+                {
+                  id: "con-ally",
+                  variableKey: "아군 수",
+                  evalStyle: "higher_better",
+                  range: { min: 1, max: 5 },
+                  influence: "medium",
+                  internalWeight: 0.6,
+                  internalCurve: "linear",
+                },
+              ],
+            },
+            {
+              id: "cand-retreat",
+              actionNodeId: retreat,
+              hardRequirements: [],
+              considerations: [
+                {
+                  id: "con-hp",
+                  variableKey: "내 HP",
+                  evalStyle: "lower_better",
+                  range: { min: 0, max: 30 },
+                  influence: "high",
+                  internalWeight: 1,
+                  internalCurve: "inverse",
+                },
+                {
+                  id: "con-dist-ret",
+                  variableKey: "플레이어 거리",
+                  evalStyle: "farther_better",
+                  range: { min: 8, max: 30, unit: "m" },
+                  influence: "low",
+                  internalWeight: 0.3,
+                  internalCurve: "linear",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: attack,
+        name: "공격",
+        kind: "state",
+        scopeId,
+        position: { x: 800, y: 80 },
+        subtitle: "행동",
+        domain: {
+          entityKind: "action",
+          timing: {},
+          interruptible: true,
+          intent: "접근해 타격을 가한다",
+          executeAction: "Play_Attack",
+          completionCondition: "공격 애니메이션 종료",
+        },
+        action: "Play_Attack",
+      },
+      {
+        id: support,
+        name: "지원요청",
+        kind: "state",
+        scopeId,
+        position: { x: 800, y: 200 },
+        subtitle: "행동",
+        domain: {
+          entityKind: "action",
+          timing: {},
+          interruptible: true,
+          intent: "아군에게 지원을 요청한다",
+          executeAction: "Call_Support",
+          completionCondition: "신호 송신 완료",
+        },
+        action: "Call_Support",
+      },
+      {
+        id: retreat,
+        name: "후퇴",
+        kind: "state",
+        scopeId,
+        position: { x: 800, y: 320 },
+        subtitle: "행동",
+        domain: {
+          entityKind: "action",
+          timing: {},
+          interruptible: true,
+          intent: "안전한 위치로 물러난다",
+          executeAction: "Move_Retreat",
+          completionCondition: "후퇴 지점 도달",
+        },
+        action: "Move_Retreat",
+      },
+    ],
+    edges: [
+      {
+        id: "guard-e1",
+        source: patrol,
+        target: alert,
+        triggerType: "event",
+        eventName: "플레이어 발견",
+        label: "플레이어 발견",
+        priority: 0,
+      },
+      {
+        id: "guard-e2",
+        source: alert,
+        target: decide,
+        triggerType: "always",
+        priority: 0,
+      },
+      // Decision → Candidate Action: candidate links (no IF/ELSE flow-condition labels)
+      {
+        id: "guard-e3",
+        source: decide,
+        target: attack,
+        triggerType: "always",
+        label: "후보",
+        priority: 0,
+        accent: "success",
+      },
+      {
+        id: "guard-e4",
+        source: decide,
+        target: support,
+        triggerType: "always",
+        label: "후보",
+        priority: 1,
+        accent: "success",
+      },
+      {
+        id: "guard-e5",
+        source: decide,
+        target: retreat,
+        triggerType: "always",
+        label: "후보",
+        priority: 2,
+        accent: "success",
+      },
+    ],
+    groups: [],
+    scopes: [{ id: scopeId, name: "경비", history: "none", regionMode: "exclusive", initialNodeId: patrol }],
+    rootScopeId: scopeId,
+    initialNodeId: patrol,
+  };
+  return ensureAllScopeSystemNodes(graph);
+}
+
+

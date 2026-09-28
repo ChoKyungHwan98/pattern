@@ -1,5 +1,6 @@
 import type { BlackboardEntry, GraphDefinition } from "./model";
 import { getTransitionTriggerType } from "./transitionSemantics";
+import { isDecisionCandidateEdge } from "./behaviorUi";
 
 export interface GraphIssue {
   id: string;
@@ -51,6 +52,10 @@ export function validateGraph(graph: GraphDefinition, blackboard: BlackboardEntr
         message: `“${edge.id}” 전환이 같은 노드로 돌아갑니다.`,
         entityId: edge.id,
       });
+    }
+    // Decision → Candidate Action links are utility candidates, not Situation flow transitions.
+    if (graph.mode !== "bt" && isDecisionCandidateEdge(graph, edge)) {
+      return;
     }
     if (graph.mode !== "bt") {
       const triggerType = getTransitionTriggerType(edge);
@@ -188,15 +193,19 @@ function validateStateMachine(
 
   const alwaysBySource = new Map<string, number>();
   graph.edges.forEach((edge) => {
+    // Candidate links are not Situation flow "always" transitions.
+    if (isDecisionCandidateEdge(graph, edge)) return;
     if (getTransitionTriggerType(edge) !== "always") return;
     alwaysBySource.set(edge.source, (alwaysBySource.get(edge.source) ?? 0) + 1);
   });
   alwaysBySource.forEach((count, source) => {
     if (count < 2) return;
+    const sourceNode = graph.nodes.find((node) => node.id === source);
+    const sourceName = sourceNode?.name ?? source;
     issues.push({
       id: `ambiguous-always:${source}`,
       severity: "error",
-      message: `한 상태에서 무조건 전환이 ${count}개 나갑니다. 조건이나 이벤트를 지정하세요.`,
+      message: `“${sourceName}”에서 무조건 전환이 ${count}개 나갑니다. 조건이나 이벤트를 지정하세요.`,
       entityId: source,
     });
   });
@@ -211,7 +220,7 @@ function validateBehaviorTree(
     issues.push({
       id: "missing-bt-root",
       severity: "error",
-      message: "Behavior Tree 루트가 지정되지 않았습니다.",
+      message: "행동 패턴 루트가 지정되지 않았습니다.",
       entityId: graph.rootNodeId,
     });
   }
@@ -240,7 +249,7 @@ function validateBehaviorTree(
     issues.push({
       id: "bt-cycle",
       severity: "error",
-      message: "Behavior Tree에 순환 연결이 있습니다.",
+      message: "행동 패턴에 순환 연결이 있습니다.",
       entityId: graph.rootNodeId,
     });
   }

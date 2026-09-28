@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { sampleProject } from "./sampleProject";
+﻿import { describe, expect, it } from "vitest";
+import { sampleProject, createGuardBehaviorGraph } from "./sampleProject";
 import { validateGraph } from "./graphValidation";
 
 describe("graph validation", () => {
@@ -36,5 +36,12 @@ describe("graph validation", () => {
     expect(validateGraph(graph)).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: `ambiguous-always:${graph.initialNodeId}` })]),
     );
+  });
+
+  it("Decision → Candidate Action 링크는 무조건 전환 모호성 검증에서 제외한다", () => {
+    const graph = createGuardBehaviorGraph();
+    const issues = validateGraph(graph);
+    expect(issues.find((issue) => issue.id.startsWith("ambiguous-always:"))).toBeUndefined();
+    expect(issues).toEqual([]);
   });
 });

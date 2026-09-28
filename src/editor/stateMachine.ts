@@ -34,7 +34,7 @@ export function scopePath(graph: GraphDefinition, scopeId?: string): StateMachin
 export function createChildMachine(
   graph: GraphDefinition,
   parentScopeId: string,
-  name = "새 하위 상태 머신",
+  name = "새 행동 묶음",
   position: Point = { x: 420, y: 240 },
 ): { graph: GraphDefinition; ownerNodeId: string; scopeId: string } {
   const scopeId = `scope-${crypto.randomUUID()}`;
@@ -54,7 +54,7 @@ export function createChildMachine(
     scopeId: parentScopeId,
     childScopeId: scopeId,
     position,
-    subtitle: "하위 상태 머신",
+    subtitle: "행동 묶음",
   };
   const graphWithScope = {
     ...graph,
